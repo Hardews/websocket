@@ -15,7 +15,7 @@ const (
 )
 
 var (
-	CloseNormal          = []byte{0x03, 0xe8} // 1000
+	CloseNormal          = []byte{0x03, 0xe8} // 1000 表示正常关闭
 	CloseGoingAway       = []byte{0x03, 0xe9} // 1001
 	CloseUnsupported     = []byte{0x03, 0xeb} // 1003
 	ClosePolicyViolation = []byte{0x03, 0xf0} // 1008 表示收到了不符合约定的数据
@@ -37,7 +37,8 @@ func (c *MyConn) ReadMsg() (m Msg, err error) {
 
 	var msg []byte
 
-again: // 这个标签是处理消息分片用的
+	// 这个标签是处理消息分片用的
+again:
 
 	// 读取第一个字节
 	firstByte := make([]byte, 1)
@@ -68,9 +69,11 @@ again: // 这个标签是处理消息分片用的
 	}
 
 	// 处理payload len
-	payloadLen := int(secondByte[0] & 0x7f) // 0111 1111 去掉第一位mask的值
-	mask := int(secondByte[0] >> 7)         // 右移七位获得最高位
+	// 0111 1111 去掉第一位mask的值
+	payloadLen := int(secondByte[0] & 0x7f)
 
+	// 右移七位获得最高位
+	mask := int(secondByte[0] >> 7)
 	// 检查是否使用mask
 	if mask != 1 {
 		err = ErrNoMask
@@ -88,9 +91,7 @@ again: // 这个标签是处理消息分片用的
 		if err != nil {
 			return
 		}
-		for _, b := range payloadLenByte {
-			payloadLen += int(b)
-		}
+		payloadLen = int(payloadLenByte[0])<<8 + int(payloadLenByte[1])
 	case payloadLen == 127:
 		// 处理后八个字节
 		payloadLen = 0
@@ -99,8 +100,11 @@ again: // 这个标签是处理消息分片用的
 		if err != nil {
 			return
 		}
-		for _, b := range payloadLenByte {
-			payloadLen += int(b)
+		for i := 7; i >= 0; i++ {
+			if payloadLenByte[i] == 0 {
+				continue
+			}
+			payloadLen += int64(payloadLenByte[i]) << (i * 8)
 		}
 	default:
 		err = ErrOfBadPayloadLen
@@ -161,7 +165,8 @@ again: // 这个标签是处理消息分片用的
 		}
 
 		m.Typ = CloseMessage
-		err = errors.New(string(errMsg[2:])) // 关闭原因
+		// 关闭原因
+		err = errors.New(string(errMsg[2:]))
 		c.Close(CloseNormal, string(errMsg[2:]))
 		c.status = false
 	default:
@@ -190,6 +195,7 @@ func (c *MyConn) WriteMsg(m Msg) (err error) {
 		}
 	}
 
+	// 写出第一个字节
 	switch m.Typ {
 	case TextMessage:
 		// FIN RSV opcode
@@ -204,6 +210,7 @@ func (c *MyConn) WriteMsg(m Msg) (err error) {
 		_, err = c.conn.Write([]byte{0x88})
 	}
 
+	// 处理payload len
 	var tmp = 0
 	var payLenByte byte
 	switch {
@@ -216,14 +223,53 @@ func (c *MyConn) WriteMsg(m Msg) (err error) {
 		length = 127
 	}
 
-	payLenByte = byte(0x00) | byte(length) // 用按位或运算来转换
+	// 用按位或运算来转换
+	payLenByte = byte(0x00) | byte(length)
 	_, err = c.conn.Write([]byte{payLenByte})
 
 	if tmp != 0 {
-		payLenByte = byte(0x00) | byte(tmp)
-		_, err = c.conn.Write([]byte{payLenByte})
+		var lengthByte []byte
+		switch length {
+		case 126:
+			// 这里处理len的想法是
+			// 一个需要存储两个字节的len 假如是 11110000 11110000
+			// 先让 length | 0x00 进行运算，取到length的低八位,append进切片
+			// 然后让 length减去低八位之后,再右移八位，获取高八位,再重复进行上面的运算
+			// 最后倒着写进去就好了 下面127同理
+			for i := 0; i < 2; i++ {
+				lengthTmp := byte(length) | byte(0x00)
+				lengthByte = append(lengthByte, lengthTmp)
+				length -= int(lengthTmp)
+				lengthTmp = byte(length >> 8)
+			}
+			tmp := lengthByte[0]
+			lengthByte[0] = lengthByte[1]
+			lengthByte[1] = tmp
+			_, err = c.conn.Write(lengthByte)
+			if err != nil {
+				return err
+			}
+		case 127:
+			for i := 0; i < 8; i++ {
+				lengthTmp := byte(length) | byte(0x00)
+				lengthByte = append(lengthByte, lengthTmp)
+				length -= int(lengthTmp)
+				lengthTmp = byte(length >> 8)
+			}
+			var nLengthByte []byte
+			for i := 7; i >= 0; i-- {
+				nLengthByte = append(nLengthByte, lengthByte[i])
+			}
+			_, err = c.conn.Write(nLengthByte)
+			if err != nil {
+				return err
+			}
+		default:
+
+		}
 	}
 
+	// 写出发送的数据
 	_, err = c.conn.Write(data)
 	return
 }
