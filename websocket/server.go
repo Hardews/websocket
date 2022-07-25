@@ -88,9 +88,7 @@ again: // 这个标签是处理消息分片用的
 		if err != nil {
 			return
 		}
-		for _, b := range payloadLenByte {
-			payloadLen += int(b)
-		}
+		payloadLen = int(payloadLenByte[0])<<8 + int(payloadLenByte[1])
 	case payloadLen == 127:
 		// 处理后八个字节
 		payloadLen = 0
@@ -99,8 +97,11 @@ again: // 这个标签是处理消息分片用的
 		if err != nil {
 			return
 		}
-		for _, b := range payloadLenByte {
-			payloadLen += int(b)
+		for i := 7; i >= 0; i++ {
+			if payloadLenByte[i] == 0 {
+				continue
+			}
+			payloadLen += int64(payloadLenByte[i]) << (i * 8)
 		}
 	default:
 		err = ErrOfBadPayloadLen
@@ -220,8 +221,45 @@ func (c *MyConn) WriteMsg(m Msg) (err error) {
 	_, err = c.conn.Write([]byte{payLenByte})
 
 	if tmp != 0 {
-		payLenByte = byte(0x00) | byte(tmp)
-		_, err = c.conn.Write([]byte{payLenByte})
+		var lengthByte []byte
+		switch length {
+		case 126:
+			// 这里处理len的想法是
+			// 一个需要存储两个字节的len 假如是111100001111000
+			// 先让 length | 0x00 进行运算，取到length的低八位,append进切片
+			// 然后让 length减去低八位之后,再右移八位，获取高八位,再重复进行上面的运算
+			// 最后倒着写进去就好了 下面127同理
+			for i := 0; i < 2; i++ {
+				lengthTmp := byte(length) | byte(0x00)
+				lengthByte = append(lengthByte, lengthTmp)
+				length -= int(lengthTmp)
+				lengthTmp = byte(length >> 8)
+			}
+			tmp := lengthByte[0]
+			lengthByte[0] = lengthByte[1]
+			lengthByte[1] = tmp
+			_, err = c.conn.Write(lengthByte)
+			if err != nil {
+				return err
+			}
+		case 127:
+			for i := 0; i < 8; i++ {
+				lengthTmp := byte(length) | byte(0x00)
+				lengthByte = append(lengthByte, lengthTmp)
+				length -= int(lengthTmp)
+				lengthTmp = byte(length >> 8)
+			}
+			var nLengthByte []byte
+			for i := 7; i >= 0; i-- {
+				nLengthByte = append(nLengthByte, lengthByte[i])
+			}
+			_, err = c.conn.Write(nLengthByte)
+			if err != nil {
+				return err
+			}
+		default:
+
+		}
 	}
 
 	_, err = c.conn.Write(data)
