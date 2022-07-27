@@ -135,20 +135,13 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadLine(pongWait)
+	// 心跳 所以当收到pong消息时 把时间延长 就可以维持连线
 	c.conn.SetPongHandler(func(a ...interface{}) error { c.conn.SetReadDeadLine(pongWait); return nil })
 	for {
 		message, err := c.conn.ReadMsg()
 		if err != nil {
 			log.Println(err)
 			break
-		}
-
-		// 心跳 这里这么设置是因为现在浏览器的pong消息是原封不动的把ping消息返回
-		// 所以当收到pong消息时 把时间延长 就可以维持连线
-		if message.Typ == websocket.PongMessage {
-			c.conn.SetReadDeadLine(pongWait)
-			c.conn.SetWriteDeadLine(writeWait)
-			continue
 		}
 
 		c.hub.broadcast <- []byte(c.username + "说: " + string(message.Content))

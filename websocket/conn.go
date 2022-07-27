@@ -34,6 +34,7 @@ type MyConn struct {
 	ReadTimeout  chan error
 	WriteTimeout chan error
 	PongHandle   Handler
+	PingHandle   Handler
 	IsPing       bool
 }
 
@@ -53,6 +54,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		ReadTimeout:  nil,
 		WriteTimeout: nil,
 		PongHandle:   nil,
+		PingHandle:   nil,
 		IsPing:       false,
 	}
 

@@ -139,16 +139,19 @@ again:
 	switch opcode {
 	case PingMessage:
 		// 按照用户设置的函数执行
-		err = c.PongHandle()
+		err = c.PingHandle()
 	case PongMessage:
 		for i := 0; i < payloadLen; i++ {
 			msg = append(msg, payload[i]^maskKey[i%4])
 		}
+		// 因为有时候客户端可能无缘无故发送pong，需要忽略
 		if !c.IsPing {
 			goto again
 		}
 		m.Content = msg
 		c.IsPing = false
+		// 按照用户设置的函数执行
+		err = c.PongHandle()
 	case TextMessage:
 		// 因为这里msg是用append方法拼装，如果遇到消息分片重来一次就没有影响
 		for i := 0; i < payloadLen; i++ {
@@ -297,6 +300,15 @@ func (c *MyConn) SetReadDeadLine(td time.Duration) error {
 }
 
 func (c *MyConn) SetPongHandler(pongTask func(a ...interface{}) error) {
+	if pongTask() == nil {
+		pongTask = func(a ...interface{}) error {
+			return nil
+		}
+	}
+	c.PongHandle = pongTask
+}
+
+func (c *MyConn) SetPingHandler(pongTask func(a ...interface{}) error) {
 	if pongTask() == nil {
 		pongTask = func(a ...interface{}) error {
 			return nil
