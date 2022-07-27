@@ -135,36 +135,36 @@ again:
 	}
 
 	//ping pong 消息是心跳消息
+	m.Typ = int(opcode)
 	switch opcode {
 	case PingMessage:
 		// 按照用户设置的函数执行
 		err = c.PongHandle()
 	case PongMessage:
-		m.Typ = PongMessage
 		for i := 0; i < payloadLen; i++ {
 			msg = append(msg, payload[i]^maskKey[i%4])
 		}
+		if !c.IsPing {
+			goto again
+		}
 		m.Content = msg
+		c.IsPing = false
 	case TextMessage:
 		// 因为这里msg是用append方法拼装，如果遇到消息分片重来一次就没有影响
 		for i := 0; i < payloadLen; i++ {
 			msg = append(msg, payload[i]^maskKey[i%4])
 		}
-		m.Typ = TextMessage
 		m.Content = msg
 	case BinaryMessage:
 		for i := 0; i < payloadLen; i++ {
 			msg = append(msg, payload[i]^maskKey[i%4])
 		}
-		m.Typ = BinaryMessage
 		m.Content = msg
 	case CloseMessage:
 		var errMsg []byte
 		for i := 0; i < payloadLen; i++ {
 			errMsg = append(errMsg, payload[i]^maskKey[i%4])
 		}
-
-		m.Typ = CloseMessage
 		// 关闭原因
 		err = errors.New(string(errMsg[2:]))
 		c.Close(CloseNormal, string(errMsg[2:]))
@@ -204,6 +204,7 @@ func (c *MyConn) WriteMsg(m Msg) (err error) {
 		_, err = c.conn.Write([]byte{0x82})
 	case PingMessage:
 		_, err = c.conn.Write([]byte{0x89})
+		c.IsPing = true
 	case PongMessage:
 		_, err = c.conn.Write([]byte{0x8a})
 	case CloseMessage:
