@@ -1,4 +1,4 @@
-package websocket
+package framework_sets
 
 import (
 	"errors"
